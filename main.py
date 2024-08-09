@@ -85,18 +85,17 @@ def collect_data():
                     break
                 test_result = prowjob["status"]["state"]
                 if test_result == "pending":
-                    continue
+                    test_result += " :clock1:"
+                elif test_result == "success":
+                    test_result += " :solid-success:"
+                elif test_result == "failure":
+                    test_result += " :failed:"
                 job_url = prowjob["status"]["url"] if "url" in prowjob["status"] else "N/A"
-
-                if test_result == "failure":
-                    reason = "failed"
-                else:
-                    reason = ""
 
                 jr = JobRun(job_id.replace('/', ''), timestamp, job_url, test_result)
                 pj.executions.append(jr)
 
-                print (f'{pj.full_name} from {jr.timestamp} parsed. Result: {jr.result}')
+                print (f'{pj.full_name} from {jr.timestamp} parsed. Result: {jr.result.split(' ')[0]}')
 
     print ("Done.")
 
@@ -120,7 +119,7 @@ def compose_summary_message():
     for version in jobs_map:
         message = f"• {version}:\n"
         for platform in jobs_map[version]:
-            message += f"    * *{platform}*:\n"
+            message += f"    • *{platform}*:\n"
             for variant in jobs_map[version][platform]:
                 results = [f"<{execution.job_url}|{execution.result}>" for execution in jobs_map[version][platform][variant]]
                 message += f"        - {variant}: " + ', '.join(results) + '\n'
@@ -130,7 +129,7 @@ def compose_summary_message():
 
 
 def post_on_slack():
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL_PRIV")
     if not webhook_url:
         raise Exception("SLACK_WEBHOOK_URL has not been provided")
     headers = {"Content-Type": "application/json"}
