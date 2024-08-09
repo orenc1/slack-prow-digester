@@ -129,7 +129,7 @@ def compose_summary_message():
 
 
 def post_on_slack():
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL_PRIV")
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
     if not webhook_url:
         raise Exception("SLACK_WEBHOOK_URL has not been provided")
     headers = {"Content-Type": "application/json"}
