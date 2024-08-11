@@ -80,13 +80,13 @@ def collect_data():
 
                 prowjob_response = requests.get(TESTS_PREFIX + pj.full_name + '/' + job_id + "prowjob.json").text
                 prowjob = json.loads(prowjob_response)
-                timestamp = prowjob["status"]["startTime"]
+                if "completionTime" not in prowjob["status"]:
+                    continue
+                timestamp = prowjob["status"]["completionTime"]
                 if before_delta(timestamp):
                     break
                 test_result = prowjob["status"]["state"]
-                if test_result == "pending":
-                    test_result += " :clock1:"
-                elif test_result == "success":
+                if test_result == "success":
                     test_result += " :solid-success:"
                 elif test_result == "failure":
                     test_result += " :failed:"
@@ -129,7 +129,7 @@ def compose_summary_message():
 
 
 def post_on_slack():
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL_PRIV")
     if not webhook_url:
         raise Exception("SLACK_WEBHOOK_URL has not been provided")
     headers = {"Content-Type": "application/json"}
