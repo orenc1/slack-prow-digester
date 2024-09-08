@@ -103,7 +103,7 @@ def collect_data():
 
 
 def organize_data():
-    for pj in periodic_jobs:
+    for pj in sorted(periodic_jobs, key=lambda pj: pj.version, reverse=True):
         if len(pj.executions) == 0:
             continue
         if pj.version not in jobs_map:
