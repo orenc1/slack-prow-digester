@@ -1,11 +1,12 @@
 import json
 import os
 import re
+from datetime import datetime, timezone, timedelta
 
 import requests as requests
 from lxml import etree
-from jobs import JobNames
-from datetime import datetime, timezone, timedelta
+
+from jobs import get_periodic_jobs
 
 TESTS_PREFIX = "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/"
 DELTA_TIME_HOURS = os.getenv("DELTA_TIME_HOURS", 24)
@@ -64,8 +65,9 @@ class JobRun:
 
 
 def set_up_jobs():
-    for jn in JobNames:
-        pj = ProwJob(jn)
+    jobs = get_periodic_jobs()
+    for j in jobs:
+        pj = ProwJob(j)
         periodic_jobs.append(pj)
 
 
