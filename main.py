@@ -2,6 +2,8 @@ import json
 import os
 import re
 from datetime import datetime, timezone, timedelta
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 import requests as requests
 from lxml import etree
@@ -21,7 +23,7 @@ platforms = [
 periodic_jobs = []
 
 jobs_map = {}
-blocks = []
+blocks_data = []
 
 class ProwJob:
     full_name : str
@@ -98,7 +100,6 @@ def collect_data():
                 pj.executions.append(jr)
 
                 print (f'{pj.full_name} from {jr.timestamp} parsed. Result: {jr.result.split(' ')[0]}')
-
     print ("Done.")
 
 
@@ -125,34 +126,33 @@ def compose_summary_message():
             for variant in jobs_map[version][platform]:
                 results = [f"<{execution.job_url}|{execution.result}>" for execution in jobs_map[version][platform][variant]]
                 message += f"        - {variant}: " + ', '.join(results) + '\n'
-        blocks.append(message)
-
-    print(blocks)
+        blocks_data.append(message)
 
 
 def post_on_slack():
+    oauth_token = os.getenv("OAUTH_TOKEN")
     if os.getenv("DEVELOPMENT") == "true":
-        webhook_url = os.getenv("SLACK_WEBHOOK_URL_PRIV")
+        channel_id = os.getenv("CHANNEL_ID_PRIV")
     else:
-        webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-    if not webhook_url:
-        raise Exception("SLACK_WEBHOOK_URL has not been provided")
-    headers = {"Content-Type": "application/json"}
-    title = "HyperShift-KubeVirt periodics summary of the last 24 hours:"
-    data = {
-        "blocks": [
-            {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": title,
-                }
-            }
-        ]
-    }
+        channel_id = os.getenv("CHANNEL_ID")
+    if not channel_id:
+        raise Exception("CHANNEL_ID has not been provided")
 
-    for block in blocks:
-        data["blocks"].append({
+    client = WebClient(token=oauth_token)
+
+    sum_results = get_summary_results()
+    summary_per_v = get_summary_per_version(sum_results)
+    title = f"HyperShift-KubeVirt periodics summary: {sum_results["total_passed"]} out of {sum_results["total"]} jobs passed in total. Details per version: {summary_per_v}"
+
+    response = client.chat_postMessage(
+        channel=channel_id,
+        text=title,
+    )
+
+    message_ts = response['ts']
+    blocks = []
+    for block in blocks_data:
+        blocks.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
@@ -160,9 +160,50 @@ def post_on_slack():
             }
         })
 
-    response = requests.post(webhook_url, json=data, headers=headers)
+    print (blocks)
+    detailed_results_response = client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=message_ts,
+        text="details:",
+        blocks=blocks,
+    )
 
-    print (response)
+
+def get_summary_results():
+    sum_results = {}
+    sum_results["total"] = 0
+    sum_results["total_passed"] = 0
+
+    for version in jobs_map:
+        sum_results[version] = {}
+        sum_results[version]["total"] = 0
+        sum_results[version]["passed"] = 0
+        for platform in jobs_map[version]:
+            for variant in jobs_map[version][platform]:
+                for execution in jobs_map[version][platform][variant]:
+                    sum_results["total"] += 1
+                    sum_results[version]["total"] += 1
+                    if execution.result.startswith("success"):
+                        sum_results["total_passed"] += 1
+                        sum_results[version]["passed"] += 1
+
+    return sum_results
+
+
+def get_summary_per_version(sum_results):
+    summary_per_v = ""
+    count = 0
+    for key, version in sum_results.items():
+        count += 1
+        if not isinstance(version, dict):
+            continue
+
+        summary_per_v += f"{key}: {version["passed"]}/{version["total"]}"
+        if count < len(sum_results):
+            summary_per_v += ", "
+
+    return summary_per_v
+
 
 def before_delta(timestamp_str):
     timestamp = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ")
@@ -176,8 +217,6 @@ def job_exists(job_id, test_name, test_jobs):
         if job["job_id"] == job_id.replace('/', '') and job["result"] != "pending":
             return True
     return False
-
-
 
 
 def create_dirs_if_not_exists(dirs):
