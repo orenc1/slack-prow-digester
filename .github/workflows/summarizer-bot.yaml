@@ -25,4 +25,5 @@ jobs:
         run: python main.py
         env:
           DELTA_TIME_HOURS: ${{ vars.DELTA_TIME_HOURS }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          OAUTH_TOKEN: ${{ secrets.OAUTH_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
