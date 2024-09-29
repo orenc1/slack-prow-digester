@@ -2,11 +2,10 @@ import json
 import os
 import re
 from datetime import datetime, timezone, timedelta
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 
 import requests as requests
 from lxml import etree
+from slack_sdk import WebClient
 
 from jobs import get_periodic_jobs
 
@@ -23,6 +22,7 @@ platforms = [
 periodic_jobs = []
 
 jobs_map = {}
+blocks_data_original = []
 blocks_data = []
 
 class ProwJob:
@@ -90,10 +90,6 @@ def collect_data():
                 if before_delta(timestamp):
                     break
                 test_result = prowjob["status"]["state"]
-                if test_result == "success":
-                    test_result += " :solid-success:"
-                elif test_result == "failure":
-                    test_result += " :failed:"
                 job_url = prowjob["status"]["url"] if "url" in prowjob["status"] else "N/A"
 
                 jr = JobRun(job_id.replace('/', ''), timestamp, job_url, test_result)
@@ -118,6 +114,77 @@ def organize_data():
         jobs_map[pj.version][pj.platform][pj.variant] = pj.executions
 
 
+def build_blocks():
+    blocks = {
+        "blocks": [
+            {
+                "type": "rich_text",
+                "elements": []
+            }
+        ]
+    }
+
+    for version in jobs_map:
+        blocks["blocks"][0]["elements"].append(rtl(version, 0))
+        for platform in jobs_map[version]:
+            blocks["blocks"][0]["elements"].append(rtl(platform, 1, bold=True))
+            for variant in jobs_map[version][platform]:
+                blocks["blocks"][0]["elements"].append(rtl(f"{variant}: ", 2))
+                add_results_sections(blocks["blocks"][0]["elements"][-1]["elements"][0]["elements"], jobs_map[version][platform][variant])
+
+    return blocks["blocks"]
+
+
+def add_results_sections(rtl_block, executions):
+    for execution in executions:
+        result_element = {
+            "type": "link",
+            "url": execution.job_url,
+            "text": execution.result + " "
+        }
+        emoji = "solid-success" if execution.result == "success" else "failed"
+        emoji_element = {
+            "type": "emoji",
+            "name": emoji
+        }
+        rtl_block.append(result_element)
+        rtl_block.append(emoji_element)
+        if executions.index(execution) < len(executions) - 1:
+            rtl_block.append(comma_section())
+
+
+def comma_section():
+    return {"type": "text", "text": ", "}
+
+
+def rts(text):
+    # rich text section
+    return {"type": "text", "text": text}
+
+
+def rtl(text, indent, bold=False):
+    # rich text list
+    return {
+        "type": "rich_text_list",
+        "style": "bullet",
+        "indent": indent,
+        "elements": [
+            {
+                "type": "rich_text_section",
+                "elements": [
+                    {
+                        "type": "text",
+                        "text": text,
+                        "style": {
+                            "bold": bold
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+
 def compose_summary_message():
     for version in jobs_map:
         message = f"• {version}:\n"
@@ -126,7 +193,21 @@ def compose_summary_message():
             for variant in jobs_map[version][platform]:
                 results = [f"<{execution.job_url}|{execution.result}>" for execution in jobs_map[version][platform][variant]]
                 message += f"        - {variant}: " + ', '.join(results) + '\n'
-        blocks_data.append(message)
+        blocks_data_original.append(message)
+
+
+def shrink_blocks():
+    new_block = ""
+    i = 0
+    for block in blocks_data_original:
+        for line in block.splitlines():
+            new_block += line + '\n'
+            if i >= 4:
+                blocks_data.append(new_block)
+                new_block = ""
+                i = 0
+                continue
+            i += 1
 
 
 def post_on_slack():
@@ -148,19 +229,9 @@ def post_on_slack():
         channel=channel_id,
         text=title,
     )
-
     message_ts = response['ts']
-    blocks = []
-    for block in blocks_data:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": block
-            }
-        })
+    blocks = build_blocks()
 
-    print (blocks)
     detailed_results_response = client.chat_postMessage(
         channel=channel_id,
         thread_ts=message_ts,
@@ -212,6 +283,7 @@ def before_delta(timestamp_str):
 
     return timestamp <= max_valid_time
 
+
 def job_exists(job_id, test_name, test_jobs):
     for job in test_jobs[test_name]:
         if job["job_id"] == job_id.replace('/', '') and job["result"] != "pending":
@@ -228,7 +300,6 @@ def main():
     set_up_jobs()
     collect_data()
     organize_data()
-    compose_summary_message()
     post_on_slack()
 
 
